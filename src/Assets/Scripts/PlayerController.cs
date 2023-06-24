@@ -5,14 +5,17 @@ using UnityEngine.UIElements;
 
 public class PlayerController : MonoBehaviour
 {
-    enum Rotstate
-    { 
-        Up=0,
-        Right=1,
-        Down=2,
-        Left=3,
+    const float TRANS_TIME = 0.05f;// 移動速度遷移時間
+    const float ROT_TIME = 0.02f;// 回転速度遷移時間
 
-        Invalid=-1,
+    enum Rotstate
+    {
+        Up = 0,
+        Right = 1,
+        Down = 2,
+        Left = 3,
+
+        Invalid = -1,
     };
 
     [SerializeField] PuyoController[] _puyoControllers = new PuyoController[2] { default!, default! };
@@ -20,7 +23,11 @@ public class PlayerController : MonoBehaviour
 
     Vector2Int _position;// 軸ぷよの位置
     Rotstate _rotate = Rotstate.Up;// 0:上 1:右 2:下 3: 左(子ぷよの位置)
-    // Start is called before the first frame update
+
+    AnimationController _animationController = new AnimationController();
+    Vector2Int _last_position;
+    Rotstate _last_rotate = Rotstate.Up;
+
     void Start()
     {
         _puyoControllers[0].SetPuyoType(PuyoType.Green);
@@ -42,26 +49,34 @@ public class PlayerController : MonoBehaviour
         return pos + rotate_tbl[(int)rot];
     }
 
-    private bool CanMove(Vector2Int pos,Rotstate rot)
+    private bool CanMove(Vector2Int pos, Rotstate rot)
     {
-        if(!boardController.CanSettle(pos)) return false;
-        if(!boardController.CanSettle(CalcChildPuyoPos(pos,rot)))return false;
+        if (!boardController.CanSettle(pos)) return false;
+        if (!boardController.CanSettle(CalcChildPuyoPos(pos, rot))) return false;
 
         return true;
     }
 
+    void SetTransition(Vector2Int pos, Rotstate rot, float time)
+    {
+        // 補間のために保存しておく
+        _last_position = _position;
+        _last_rotate = _rotate;
+
+        // 値の更新
+        _position = pos;
+        _rotate = rot;
+
+        _animationController.Set(time);
+    }
     private bool Translate(bool is_right)
     {
         // 仮想的に移動できるか検証する
-        Vector2Int pos = _position+(is_right ? Vector2Int.right:Vector2Int.left);
-        if(!CanMove(pos,_rotate))return false;
+        Vector2Int pos = _position + (is_right ? Vector2Int.right : Vector2Int.left);
+        if (!CanMove(pos, _rotate)) return false;
 
         // 実際に移動
-        _position = pos;
-
-        _puyoControllers[0].SetPos(new Vector3((float)_position.x, (float)_position.y, 0.0f));
-        Vector2Int posChild = CalcChildPuyoPos(_position, _rotate);
-        _puyoControllers[1].SetPos(new Vector3((float)posChild.x, (float)posChild.y, 0.0f));
+        SetTransition(pos, _rotate, TRANS_TIME);
 
         return true;
     }
@@ -69,16 +84,16 @@ public class PlayerController : MonoBehaviour
     bool Rotate(bool is_right)
     {
         // &3は0011とのAND論理演算
-        Rotstate rot = (Rotstate) ( ((int) _rotate +(is_right ? +1: +3)) &3 );
+        Rotstate rot = (Rotstate)(((int)_rotate + (is_right ? +1 : +3)) & 3);
 
         // 仮想的に移動できるか検証する(上下左右にずらした時も確認)
         Vector2Int pos = _position;
-        switch(rot)
+        switch (rot)
         {
             case Rotstate.Down:
                 // 右(左)から下:自分の下か右(左)下にブロックがあれば引き上げる
-                if(!boardController.CanSettle(pos+Vector2Int.down) ||
-                   !boardController.CanSettle(pos+new Vector2Int(is_right ? 1:-1,-1)))
+                if (!boardController.CanSettle(pos + Vector2Int.down) ||
+                    !boardController.CanSettle(pos + new Vector2Int(is_right ? 1 : -1, -1)))
                 {
                     pos += Vector2Int.up;
                 }
@@ -91,74 +106,106 @@ public class PlayerController : MonoBehaviour
             case Rotstate.Left:
                 // 左:左が埋まっていれば、右に移動
                 if (!boardController.CanSettle(pos + Vector2Int.left)) pos += Vector2Int.right;
-                break; 
+                break;
             case Rotstate.Up:
                 break;
-                default:
+            default:
                 Debug.Assert(false);
                 break;
         }
-
-        if(!CanMove(pos,rot))return false;
+        if (!CanMove(pos, rot)) return false;
 
         // 実際に移動
-        _position=pos;
-        _rotate = rot;
-
-        _puyoControllers[0].SetPos(new Vector3((float)_position.x, (float)_position.y, 0.0f));
-        Vector2Int posChild = CalcChildPuyoPos(_position, _rotate);
-        _puyoControllers[1].SetPos(new Vector3(((float)posChild.x), (float)posChild.y, 0.0f));
+        SetTransition(pos, rot, ROT_TIME);
 
         return true;
     }
 
     void QuickDrop()
     {
-        Vector2Int pos=_position;
-
+        // 落ちれる一番下まで落ちる
+        Vector2Int pos = _position;
         do
         {
             pos += Vector2Int.down;
         } while (CanMove(pos, _rotate));
-        pos-= Vector2Int.down;
+        pos -= Vector2Int.down;// 一つ上の場所(最後に置けた場所)に戻す
 
-        _position= pos;
+        _position = pos;
 
+        // 直接接地
         bool is_set0 = boardController.Settle(_position,
             (int)_puyoControllers[0].GetPuyoType());
-        Debug.Assert(is_set0);
+        Debug.Assert(is_set0);// 置いたのは空いていた場所のはず
 
         bool is_set1 = boardController.Settle(CalcChildPuyoPos(_position, _rotate),
             (int)_puyoControllers[1].GetPuyoType());
-        Debug.Assert(is_set1);
+        Debug.Assert(is_set1);// 置いたのは空いていた場所のはず
 
         gameObject.SetActive(false);
     }
-    void Update()
+    void Control()
     {
         // 平行移動のキー入力取得
-        if(Input.GetKeyDown(KeyCode.RightArrow))
+        if (Input.GetKeyDown(KeyCode.RightArrow))
         {
-            Translate(true);
+            if (Translate(true)) return;
         }
-        if(Input.GetKeyDown(KeyCode.LeftArrow))
+        if (Input.GetKeyDown(KeyCode.LeftArrow))
         {
-            Translate(false);
+            if (Translate(false)) return;
         }
 
         // 回転のキー入力取得
-        if(Input.GetKeyDown(KeyCode.X))// 右回転
+        if (Input.GetKeyDown(KeyCode.X))// 右回転
         {
-            Rotate(true);
+            if (Rotate(true)) return;
         }
         if (Input.GetKeyDown(KeyCode.Z))// 右回転
         {
-            Rotate(false);
+            if (Rotate(false)) return;
         }
-
-        if(Input.GetKey(KeyCode.UpArrow))
+        // クイックドロップのキー入力取得
+        if (Input.GetKey(KeyCode.UpArrow))
         {
             QuickDrop();
         }
+    }
+    void Update()
+    {
+        if (!_animationController.Update(Time.deltaTime))// アニメ中はキー入力を受け付けない
+        {
+            Control();
+        }
+
+        float anim_rate = _animationController.GetNormalized();
+        _puyoControllers[0].SetPos(Interpolate(_position, Rotstate.Invalid, _last_position, Rotstate.Invalid, anim_rate));
+        _puyoControllers[1].SetPos(Interpolate(_position, _rotate, _last_position, _last_rotate, anim_rate));
+
+    }
+
+    // rateが 1 -> 0 で、pos_last -> pos, rot_last->rotに遷移。
+    // rot が RotState.Invalid なら回転を考慮しない（軸ぷよ用）
+    static Vector3 Interpolate(Vector2Int pos, Rotstate rot, Vector2Int pos_last, Rotstate rot_last, float rate)
+    {
+        // 平行移動
+        Vector3 p = Vector3.Lerp(
+            new Vector3((float)pos.x, (float)pos.y, 0.0f),
+            new Vector3((float)pos_last.x, (float)pos_last.y, 0.0f), rate);
+
+        if (rot == Rotstate.Invalid) return p;
+
+        // 回転
+        float theta0 = 0.5f * Mathf.PI * (float)(int)rot;
+        float theta1 = 0.5f * Mathf.PI * (float)(int)rot_last;
+        float theta = theta1 - theta0;
+
+        // 近い方に回る
+        if (+Mathf.PI < theta) theta = theta - 2.0f * Mathf.PI;
+        if (theta < -Mathf.PI) theta = theta + 2.0f * Mathf.PI;
+
+        theta = theta0 + rate * theta;
+
+        return p + new Vector3(Mathf.Sin(theta), Mathf.Cos(theta), 0.0f);
     }
 }
