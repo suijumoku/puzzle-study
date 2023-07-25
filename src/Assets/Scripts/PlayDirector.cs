@@ -2,15 +2,16 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using TMPro;
 
 interface IState
 {
     public enum E_State
     {
-        Control=0,
-        GameOver=1,
-        Falling=2,
-        Erasing=3,
+        Control = 0,
+        GameOver = 1,
+        Falling = 2,
+        Erasing = 3,
 
         MAX,
 
@@ -20,50 +21,59 @@ interface IState
     E_State Initialize(PlayDirector parent);
     E_State Update(PlayDirector parent);
 }
+
 [RequireComponent(typeof(BoardController))]
 public class PlayDirector : MonoBehaviour
 {
     [SerializeField] GameObject player = default!;
-    PlayerController _playerController=null;
+    PlayerController _playerController = null;
     Logicallnput _logicalInput = new();
     BoardController _boardController = default!;
 
     NextQueue _nextQueue = new();
     [SerializeField] PuyoPair[] nextPuyoPairs = { default!, default! }; // 次のnextのゲームオブジェクトの制御
 
+    // 得点
+    [SerializeField] TextMeshProUGUI textScore = default!;
+    uint _score = 0;
+    int _chainCount = -1;// 連鎖数（得点計算に必要）
+
     // 状態管理
-    IState.E_State _current_state=IState.E_State.Falling;
-    static readonly IState[] states = new IState[(int)IState.E_State.MAX]
-    {
+    IState.E_State _current_state = IState.E_State.Falling;
+    static readonly IState[] states = new IState[(int)IState.E_State.MAX]{
         new ControlState(),
         new GameOverState(),
         new FallingState(),
         new ErasingState(),
     };
+
     // Start is called before the first frame update
     void Start()
     {
         _playerController = player.GetComponent<PlayerController>();
-        _boardController=GetComponent<BoardController>();
+        _boardController = GetComponent<BoardController>();
         _logicalInput.Clear();
         _playerController.SetLogicalInput(_logicalInput);
 
 
         _nextQueue.Initialize();
+
         // 状態の初期化
-        InitializeState();
-        
+     //   InitializeState();
+
+        SetScore(0);
     }
     void UpdateNextView()
     {
-        _nextQueue.Each((int idx, Vector2Int n) => {
+        _nextQueue.Each((int idx, Vector2Int n) =>
+        {
             nextPuyoPairs[idx++].SetPuyoType((PuyoType)n.x, (PuyoType)n.y);
         });
     }
 
     static readonly KeyCode[] key_code_tbl = new KeyCode[(int)Logicallnput.Key.MAX]
 {
-        KeyCode.RightArrow, // Rigth
+        KeyCode.RightArrow, // Right
         KeyCode.LeftArrow,  // Left
         KeyCode.X,          // RtoR
         KeyCode.Z,          // RtoL
@@ -87,25 +97,11 @@ public class PlayDirector : MonoBehaviour
         _logicalInput.Update(inputDev);
     }
 
-    // Update is called once per frame
-    void FixedUpdate()
-    {
-        // 入力を取り込む
-        UpdateInput();
-
-        UpdateState();
-
-        if(!player.activeSelf)
-        {
-            Spawn(_nextQueue.Update());
-            UpdateNextView();
-        }
-    }
-    class ControlState:IState
+    class ControlState : IState
     {
         public IState.E_State Initialize(PlayDirector parent)
         {
-            if(!parent.Spawn(parent._nextQueue.Update()))
+            if (!parent.Spawn(parent._nextQueue.Update()))
             {
                 return IState.E_State.GameOver;
             }
@@ -118,8 +114,19 @@ public class PlayDirector : MonoBehaviour
             return parent.player.activeSelf ? IState.E_State.Unchanged : IState.E_State.Falling;
         }
     }
-
-    class FallingState:IState
+    class GameOverState : IState
+    {
+        public IState.E_State Initialize(PlayDirector parent)
+        {
+            SceneManager.LoadScene(0);// リトライ
+            return IState.E_State.Unchanged;
+        }
+        public IState.E_State Update(PlayDirector parent)
+        {
+            return IState.E_State.Unchanged;
+        }
+    }
+    class FallingState : IState
     {
         public IState.E_State Initialize(PlayDirector parent)
         {
@@ -135,7 +142,12 @@ public class PlayDirector : MonoBehaviour
     {
         public IState.E_State Initialize(PlayDirector parent)
         {
-            return parent._boardController.CheckErase() ? IState.E_State.Unchanged : IState.E_State.Control;
+            if (parent._boardController.CheckErase(parent._chainCount++))
+            {
+                return IState.E_State.Unchanged;// 消すアニメーションに突入
+            }
+            parent._chainCount = 0;// 連鎖が途切れた
+            return IState.E_State.Control;// 消すものはない
         }
         public IState.E_State Update(PlayDirector parent)
         {
@@ -170,17 +182,28 @@ public class PlayDirector : MonoBehaviour
         }
     }
 
-    class GameOverState : IState
+
+    void FixedUpdate()
     {
-        public IState.E_State Initialize(PlayDirector parent)
-        {
-            SceneManager.LoadScene(0);// リトライ
-            return IState.E_State.Unchanged;
-        }
-        public IState.E_State Update(PlayDirector parent)
-        {
-            return IState.E_State.Unchanged;
-        }
+        // 入力を取り込む
+        UpdateInput();
+
+        UpdateState();
+
+        AddScore(_playerController.popScore());
+        AddScore(_boardController.popScore());
+
     }
     bool Spawn(Vector2Int next) => _playerController.Spawn((PuyoType)next[0], (PuyoType)next[1]);
+
+    void SetScore(uint score)
+    {
+        _score = score;
+        textScore.text = _score.ToString();
+    }
+
+    void AddScore(uint score)
+    {
+        if (0 < score) SetScore(_score + score);
+    }
 }

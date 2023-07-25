@@ -7,7 +7,7 @@ class NextQueue
     private  enum Constants
     {
         PUYO_TYPE_MAX=4,      // 現れる種類（6以下） 
-        PUYO_TYPE_HISTORIES=2 // NEXTの個数
+        PUYO_NEXT_HISTORIES=2 // NEXTの個数
     };
 
     Queue<Vector2Int> _nexts = new();
@@ -22,7 +22,7 @@ class NextQueue
     public void Initialize()
     {
         // キューをPUYO_NEXT_HISTORIESセットの乱数で満たす
-        for(int t=0;t<(int)Constants.PUYO_TYPE_HISTORIES;t++)
+        for(int t=0;t<(int)Constants.PUYO_NEXT_HISTORIES;t++)
         {
             _nexts.Enqueue(CreateNext());
         }

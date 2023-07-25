@@ -1,12 +1,13 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UIElements;
 
 public class PlayerController : MonoBehaviour
 {
+    // 移動制御
     const int TRANS_TIME = 3;// 移動速度遷移時間
     const int ROT_TIME = 3;// 回転速度遷移時間
+    // 落下制御
     const int FALL_COUNT_UNIT = 120; // ひとマス落下するカウント数
     const int FALL_COUNT_SPD = 10; // 落下速度
     const int FALL_COUNT_FAST_SPD = 20;// 高速落下時の速度
@@ -24,18 +25,21 @@ public class PlayerController : MonoBehaviour
 
     [SerializeField] PuyoController[] _puyoControllers = new PuyoController[2] { default!, default! };
     [SerializeField] BoardController boardController = default!;
+    Logicallnput _logicalInput = null;
 
-    Vector2Int _position;// 軸ぷよの位置
+    Vector2Int _position = new Vector2Int(2,12);// 軸ぷよの位置
     Rotstate _rotate = Rotstate.Up;// 0:上 1:右 2:下 3: 左(子ぷよの位置)
 
     AnimationController _animationController = new AnimationController();
     Vector2Int _last_position;
     Rotstate _last_rotate = Rotstate.Up;
-    Logicallnput _logicalInput = new();
 
     // 落下制御
     int _fallCount = 0;
     int _groundFrame = GROUND_FRAMES; // 接地時間
+
+    // 得点
+    uint _additiveScore = 0;
 
     void Start()
     {
@@ -46,6 +50,8 @@ public class PlayerController : MonoBehaviour
     {
         _logicalInput=reference;
     }
+
+    // 新しくぷよを出す
     public bool Spawn(PuyoType axis,PuyoType child)
     {
         // 初期位置に出せるか確認
@@ -131,7 +137,6 @@ public class PlayerController : MonoBehaviour
                 }
                 break;
             case Rotstate.Right:
-                bool a = !boardController.CanSettle(pos + Vector2Int.right);
                 // 右:右が埋まっていれば、左に移動
                 if (!boardController.CanSettle(pos + Vector2Int.right)) pos += Vector2Int.left;
                 break;
@@ -206,6 +211,8 @@ public class PlayerController : MonoBehaviour
             _fallCount += FALL_COUNT_UNIT;
         }
 
+        if (is_fast) _additiveScore++; // 下に入れて、落ちれるときはボーナス追加
+
         return true;
     }
     void Control()
@@ -249,8 +256,8 @@ public class PlayerController : MonoBehaviour
         // 表示
         Vector3 dy = Vector3.up * (float)_fallCount / (float)FALL_COUNT_UNIT;
         float anim_rate = _animationController.GetNormalized();
-        _puyoControllers[0].SetPos(Interpolate(_position, Rotstate.Invalid, _last_position, Rotstate.Invalid, anim_rate));
-        _puyoControllers[1].SetPos(Interpolate(_position, _rotate, _last_position, _last_rotate, anim_rate));
+        _puyoControllers[0].SetPos(dy+Interpolate(_position, Rotstate.Invalid, _last_position, Rotstate.Invalid, anim_rate));
+        _puyoControllers[1].SetPos(dy+Interpolate(_position, _rotate, _last_position, _last_rotate, anim_rate));
 
     }
 
@@ -277,5 +284,14 @@ public class PlayerController : MonoBehaviour
         theta = theta0 + rate * theta;
 
         return p + new Vector3(Mathf.Sin(theta), Mathf.Cos(theta), 0.0f);
+    }
+
+    public uint popScore()
+    {
+        uint score = _additiveScore;
+        _additiveScore = 0;
+
+        return score;
+
     }
 }
